@@ -74,6 +74,9 @@ datum.AttachmentOffset = App.Placement(V(0, 0, ALTURA), App.Rotation())
 # para que o loft regrado tenha arestas correspondentes (6 vertices x 6 vertices).
 # pts_base percorre em sentido horario; os arcos sao criados anti-horario e unidos.
 ang_cw = [math.atan2(p.y, p.x) for p in pts_base]
+# extremidades da fenda: corda de exatamente 1 mm no circulo, centrada no eixo +Y
+d = math.asin(g / R)
+ang_cw[0], ang_cw[-1] = math.pi / 2 - d, math.pi / 2 + d
 
 sk_tubo = body.newObject("Sketcher::SketchObject", "Sketch_Tubo")
 sk_tubo.AttachmentSupport = [(datum, "")]
@@ -84,14 +87,8 @@ for i in range(len(ang_cw) - 1):
     while a_end <= a_start:
         a_end += 2 * math.pi
     sk_tubo.addGeometry(Part.ArcOfCircle(circ, a_start, a_end), False)
-for i in range(len(ang_cw) - 2):
-    # fim (anti-horario) do arco i+1 coincide com inicio do arco i
-    sk_tubo.addConstraint(Sketcher.Constraint("Coincident", i + 1, 2, i, 1))
-    sk_tubo.addConstraint(Sketcher.Constraint("Coincident", i, 3, i + 1, 3))
-sk_tubo.addConstraint(Sketcher.Constraint("Coincident", 0, 3, -1, 1))       # centro na origem
-sk_tubo.addConstraint(Sketcher.Constraint("Radius", 0, R))
-sk_tubo.addConstraint(Sketcher.Constraint("DistanceX", 4, 1, 0, 2, GAP))    # fenda de 1 mm
-sk_tubo.addConstraint(Sketcher.Constraint("Symmetric", 4, 1, 0, 2, -2))     # fenda no eixo +Y
+# Geometria ja e exata (coordenadas calculadas); sem restricoes para evitar
+# conflitos do solver entre arcos concentricos encadeados.
 
 doc.recompute()
 
