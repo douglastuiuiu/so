@@ -92,37 +92,53 @@ for i in range(len(ang_cw) - 1):
 
 doc.recompute()
 
-# ---------------- Loft de chapa ----------------
-loft = None
-try:
-    import SheetMetal  # noqa: F401  (verifica bancada instalada)
-    try:
-        loft = doc.addObject("SheetMetal::SMLoft", "SMLoft")
-        loft.Sections = [sk_base, sk_tubo]
-        loft.Thickness = ESPESSURA
-    except Exception:
-        if loft is not None:
-            doc.removeObject(loft.Name)
-        loft = None
-except ImportError:
-    pass
+# ---------------- Loft de chapa (espessura 1.0 mm) ----------------
+# A bancada SheetMetal nao possui "SMLoft". O solido da chapa e gerado por um
+# loft regrado entre dois perfis fechados em "C" (contorno interno + contorno
+# externo deslocado de ESPESSURA), mantendo as medidas internas exatas e a fenda
+# de 1 mm para planificacao (SheetMetal > Unfold).
+T = ESPESSURA
 
-if loft is None:
-    superficie = doc.addObject("Part::Loft", "Loft_Superficie")
-    superficie.Sections = [sk_base, sk_tubo]
-    superficie.Solid = False
-    superficie.Ruled = True
-    superficie.Closed = False
 
-    loft = doc.addObject("Part::Offset", "SMLoft")       # chapa com espessura
-    loft.Source = superficie
-    loft.Value = ESPESSURA                                 # para fora: medidas internas preservadas
-    loft.Mode = "Skin"
-    loft.Join = "Intersection"
-    loft.Fill = True
-    superficie.Visibility = False
+def perfil_base():
+    inn = pts_base
+    out = [V(g, b + T, 0), V(a + T, b + T, 0), V(a + T, -b - T, 0),
+           V(-a - T, -b - T, 0), V(-a - T, b + T, 0), V(-g, b + T, 0)]
+    ed = [Part.LineSegment(inn[i], inn[i + 1]).toShape() for i in range(5)]
+    ed.append(Part.LineSegment(inn[5], out[5]).toShape())
+    ed += [Part.LineSegment(out[i + 1], out[i]).toShape() for i in reversed(range(5))]
+    ed.append(Part.LineSegment(out[0], inn[0]).toShape())
+    return Part.Wire(ed)
+
+
+def perfil_tubo():
+    def p(r, t):
+        return V(r * math.cos(t), r * math.sin(t), ALTURA)
+
+    def arco(r, t1, t2):  # de t1 para t2 em sentido horario (t2 < t1)
+        while t2 >= t1:
+            t2 -= 2 * math.pi
+        return Part.Arc(p(r, t1), p(r, (t1 + t2) / 2), p(r, t2)).toShape()
+
+    r_in, r_out = R, R + T
+    ed = [arco(r_in, ang_cw[i], ang_cw[i + 1]) for i in range(5)]
+    ed.append(Part.LineSegment(p(r_in, ang_cw[5]), p(r_out, ang_cw[5])).toShape())
+    ed += [Part.Arc(p(r_out, ang_cw[i + 1]),
+                    p(r_out, ang_cw[i + 1] + (((ang_cw[i] - ang_cw[i + 1]) % (2 * math.pi)) / 2)),
+                    p(r_out, ang_cw[i])).toShape() for i in reversed(range(5))]
+    ed.append(Part.LineSegment(p(r_out, ang_cw[0]), p(r_in, ang_cw[0])).toShape())
+    return Part.Wire(ed)
+
+
+solido = Part.makeLoft([perfil_base(), perfil_tubo()], True, True)
+loft = doc.addObject("Part::Feature", "SMLoft")
+loft.Shape = solido
+loft.Label = "SMLoft (chapa {:.1f} mm)".format(T)
+sk_base.Visibility = False
+sk_tubo.Visibility = False
 
 # ---------------- Salvamento ----------------
 doc.recompute()
 doc.saveAs(os.path.join(os.getcwd(), "transicao_calha.fcstd"))
-App.Console.PrintMessage("Arquivo salvo: transicao_calha.fcstd\n")
+App.Console.PrintMessage("Arquivo salvo: transicao_calha.fcstd | volume = {:.1f} mm3 | valido = {}\n"
+                         .format(solido.Volume, solido.isValid()))
